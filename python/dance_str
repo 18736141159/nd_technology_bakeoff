@@ -1,0 +1,189 @@
+import cv2
+from PIL import Image,ImageDraw,ImageFont
+import os
+import subprocess
+from pydub import AudioSegment
+from ffmpy import FFmpeg
+import pydub
+
+from moviepy.editor import VideoFileClip
+
+ascii_char = list("$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\|()1{}[]?-_+~<>i!lI;:,\"^`'.")
+
+
+def get_file_times(filename):        #计算时长
+    u"""
+    获取视频时长（s:秒）
+    """
+    clip = VideoFileClip(filename)
+    file_time =clip.duration
+    return file_time
+
+
+def video2txtimage(video_file):
+    VIpath = 'img/'
+    video = cv2.VideoCapture(video_file)
+    if video.isOpened():
+        fps = video.get(cv2.CAP_PROP_FPS)  # 获取帧数
+        file_time = get_file_times(video_file)
+        print("fps = "+str(fps))
+        print("时长为："+str(file_time))
+        print("整个过程大约会产生 %s 张照片。（实际文件中为2倍数值）" % (str(fps * file_time)))
+        a = input("回车继续(q退出)：")
+        if a.lower() == 'q':
+            exit()
+            #返回视频总帧数，默认返回的是float类型
+        total_num = video.get(7)
+        #最后一个帧数不取
+        for num in range(int(total_num)-1):
+            r,frame = video.read()
+            try:
+                cv2.imwrite(VIpath+str(num)+'.jpg',frame)
+                get_txt_image(VIpath, str(num) + '.jpg')
+            except OSError:
+                print("产生失败，跳过。")
+            print("第%d帧原始图像已生成" %num)
+           # get_txt_image(VIpath,str(num) + '.jpg')
+        video.release()
+        return fps
+    else :
+        print('读取帧数失败')
+        exit()
+
+"""cv2.VideoCapture()函数读取视频原文件并生成一个视频类对象；video.get(7)获取视频的总帧数。
+video.read()有两个返回值，第一个表示获取下一帧数据是否成功，第二个存储了下一帧的数据内容。
+cv2.imwrite()用于将帧数据储存为图片。这部分代码功能应该说比较简单，主要是对OpenCV包的运用。"""
+
+
+"""生成字符串在这一步中，我们需要逐一读入上一步中生成的原图，获取像素尺寸，
+并将每一个像素根据颜色和亮度转换为相应的字符（下面这段代码就是像素到字符的功能函数），
+然后将所有字符拼接为一整个字符串。"""
+def get_char(r,g,b,alpha = 256):    #alpha透明度
+    if alpha == 0:
+        return ' '
+    length = len(ascii_char)
+    gray = int(0.2126 * r + 0.7152 * g + 0.0722 * b)#计算灰度
+    unit = (256.0 + 1)/length
+    return ascii_char[int(gray / unit)]
+
+def get_txt_image(path, filename):
+    im = Image.open(path+filename).convert('RGB')
+    #gif拆分后的图像，需要转换，否则报错，由于gif分割后保存的是索引颜色
+    raw_width = im.width
+    raw_height = im.height
+    width = int(raw_width/6)
+    height = int(raw_height/15)
+    im = im.resize((width,height),Image.NEAREST)
+
+    txt=""
+    colors = []
+    for i in range(height):
+        for j in range(width):
+            pixel = im.getpixel((j,i))
+            colors.append((pixel[0],pixel[1],pixel[2]))
+            if(len(pixel) == 4):
+                txt += get_char(pixel[0],pixel[1],pixel[2],pixel[3])
+            else:
+                txt += get_char(pixel[0],pixel[1],pixel[2])
+        txt += '\n'
+        colors.append((255,255,255))
+
+    im_txt = Image.new("RGB",(raw_width,raw_height),(255,255,255))
+    dr = ImageDraw.Draw(im_txt)
+    #font = ImageFont.truetype(os.path.join("fonts","汉仪楷体简.ttf"),18)
+    font=ImageFont.load_default().font
+
+    x=y=0
+    #获取字体的宽高
+    font_w,font_h=font.getsize(txt[1])
+    font_h *= 1.37 #调整后更佳
+    #ImageDraw为每个ascii码进行上色
+    for i in range(len(txt)):
+        if(txt[i]=='\n'):
+            x+=font_h
+            y=-font_w
+        dr.text((y,x),txt[i], fill = colors[i])
+        y+=font_w
+
+    name = filename
+   # print(name+' changed')
+    im_txt.save('new_img/'+name)
+"""
+    im = Image.open(path + filename).convert('RGB')
+    WIDTH = im.width
+    HEIGHT = im.height
+    #width = int(raw_width / 6)
+   # height = int(raw_height / 15)
+    im = im.resize((WIDTH, HEIGHT), Image.NEAREST)
+    im_txt = Image.new("RGB", (WIDTH * 6, HEIGHT * 8), (255, 255, 255))  ####
+    dr = ImageDraw.Draw(im_txt)  #####
+    txt = ""
+    for i in range(HEIGHT):
+        for j in range(WIDTH):
+            txt += get_char(*im.getpixel((j, i)))  # 获得相应的字符
+        txt += "\n"
+
+
+    x = y = 0
+    # 获取字体的宽高
+    font = ImageFont.load_default().font
+    font_w, font_h = font.getsize(txt[1])
+    # font_h *= 1.37  # 调整后更佳
+    # ImageDraw为每个ascii码进行上色
+    for i in range(len(txt)):
+        if (txt[i] == '\n'):
+            x += font_h
+            y = -font_w
+        dr.text((y, x), txt[i], fill="#000000")
+        y += font_w
+    im_txt.save('new_img/' + filename)
+    """
+def image2video(out_file,fps):
+    Ipath = 'new_img'
+    fource = cv2.VideoWriter_fourcc(*"MJPG")
+    images = os.listdir(Ipath)  #用于返回指定的文件夹包含的文件或文件夹的名字的列表。
+    im = Image.open(Ipath+'/'+images[0])
+    new_video = cv2.VideoWriter(out_file,fource,fps,im.size)
+    os.chdir(Ipath)  #方法用于改变当前工作目录到指定的路径
+    for image in range(1,len(images)+1):
+        frame = cv2.imread(str(image)+'.jpg')
+        new_video.write(frame)
+    print("视频合成完毕")
+    os.chdir('..')
+    new_video.release()
+
+
+# 调用ffmpeg获取mp3音频文件
+def video2mp3(file_name): #获取音乐，并变成.mp3格式
+    outfile_name = file_name.split('.')[0] + '.mp3'
+   # subprocess.call('ffmpeg -i ' + file_name + ' -f mp3 ' + outfile_name, shell=True)
+   # subprocess.call('ffmpeg -i %s -f mp3 %s' %(file_name,outfile_name), shell=True)
+    os.system('ffmpeg -i %s -f mp3 %s' %(file_name,outfile_name))
+    #执行指定的命令，返回命令执行状态，其功能类似于os.system(cmd)。
+
+# 合成音频和视频文件
+def video_add_mp3(file_name, mp3_file):
+    outfile_name = file_name.split('.')[0] + '-txt.mp4'
+    #subprocess.call('ffmpeg -i %s -i %s -strict -2 -f mp4 %s' %(file_name,mp3_file,outfile_name), shell=True)
+    os.system('ffmpeg -i %s -i %s -strict -2 -f mp4 %s' %(file_name,mp3_file,outfile_name))
+
+
+#提取视频中的音频
+def Extractin_audio(file_name):
+    os.system("ffmpeg -i %s -vn -y -acodec copy %s"%('vedio/'+file_name,'music/'+file_name.split('.')[0]+'.mp3'))
+    return file_name.split('.')[0]+'.mp3'
+
+if __name__ == '__main__':
+    while True:
+        a = input("请输入视频名称（注意格式为.avi）：")
+        if os.path.exists('vedio/'+a):
+            break
+        else:
+            print("找不到图片，请重新输入！")
+    fps = video2txtimage('vedio/'+a)
+    print(fps)
+    image2video('new_vedio/'+a,fps)
+
+    music_name = Extractin_audio(a.split('.')[0]+".avi")
+  #  video2mp3('music/'+b)
+    video_add_mp3('new_vedio/'+a,'music/'+a.split('.')[0]+'.mp3')
